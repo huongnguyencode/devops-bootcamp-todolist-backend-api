@@ -178,11 +178,11 @@ pipeline {
                 echo "=== Applying namespace ==="
                 kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
 
-                echo "=== Creating database secret ==="
-                kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
-                kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \
-                    --from-literal=username=produser \
-                    --from-literal=password=${PROD_DB_PASS}
+                echo "=== Creating PostgreSQL secret ==="
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret postgres-secret --ignore-not-found=true
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic postgres-secret \
+                    --from-literal=POSTGRES_USER=produser \
+                    --from-literal=POSTGRES_PASSWORD=${PROD_DB_PASS}
 
                 echo "=== Deploying backend ==="
                 kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
@@ -200,6 +200,10 @@ pipeline {
                 else
                     echo "k8s/ingress.yaml not found, skipping ingress."
                 fi
+
+                echo "=== Restart deployments ==="
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist rollout restart deployment/backend
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist rollout restart deployment/frontend
 
                 echo "=== Deployment status ==="
                 kubectl --kubeconfig=${KUBECONFIG} -n todolist get pods
