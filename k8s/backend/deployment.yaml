@@ -20,8 +20,8 @@ spec:
     spec:
       containers:
       - name: backend
-        image: todo-backend:latest
-        imagePullPolicy: IfNotPresent
+        image: huongcode/todo-backend:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
           name: http
