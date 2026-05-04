@@ -135,7 +135,7 @@ pipeline {
             }
         }
 
-        stage('Deploy to Production') {
+                stage('Deploy to Production') {
             when {
                 branch 'master'
             }
@@ -145,10 +145,24 @@ pipeline {
                     string(credentialsId: 'prod-db-pass', variable: 'PROD_DB_PASS')
                 ]) {
                     script {
-                        sh """
-                            kubectl --kubeconfig=${KUBECONFIG} create namespace todolist --dry-run=client -o yaml | kubectl apply -f -
-                            kubectl --kubeconfig=${KUBECONFIG} create secret generic db-secret --from-literal=password=${PROD_DB_PASS} --namespace=todolist --dry-run=client -o yaml | kubectl apply -f -
-                        """
+                        sh '''
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
+                            
+                            kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
+                            kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \\
+                                --from-literal=username=produser \\
+                                --from-literal=password=${PROD_DB_PASS}
+                            
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/deployment.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/service.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/configmap.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/deployment.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/service.yaml
+                            
+                            # Nếu có ingress.yaml
+                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/ingress.yaml
+                        '''
                     }
                 }
             }
