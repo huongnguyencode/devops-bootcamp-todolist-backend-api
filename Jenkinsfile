@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HUB_CREDS = credentials('dockerhub-cred')
         APP_EC2_IP = '10.0.1.170'
         TOOLS_EC2_IP = '10.0.1.254'
         DB_HOST = '10.0.3.11'
@@ -17,17 +16,17 @@ pipeline {
                 script {
                     deleteDir()
                 }
-                
+
                 dir('frontend') {
                     git branch: 'master',
                         url: "https://github.com/${FRONTEND_REPO}.git",
-                        credentialsId: 'github-token'
+                        credentialsId: 'github-cred'
                 }
-                
+
                 dir('backend') {
                     git branch: 'master',
                         url: "https://github.com/${BACKEND_REPO}.git",
-                        credentialsId: 'github-token'
+                        credentialsId: 'github-cred'
                 }
             }
         }
@@ -43,7 +42,7 @@ pipeline {
                                 .
                         """
                     }
-                    
+
                     dir('backend') {
                         sh """
                             docker build \
@@ -61,20 +60,24 @@ pipeline {
                 branch 'master'
             }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    script {
-                        sh """
-                            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                            
-                            cd frontend
-                            docker push ${DOCKER_HUB_USER}/todo-frontend:${GIT_COMMIT}
-                            docker push ${DOCKER_HUB_USER}/todo-frontend:latest
-                            
-                            cd ../backend
-                            docker push ${DOCKER_HUB_USER}/todo-backend:${GIT_COMMIT}
-                            docker push ${DOCKER_HUB_USER}/todo-backend:latest
-                        """
-                    }
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-cred',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
+
+                        cd frontend
+                        docker push ${DOCKER_HUB_USER}/todo-frontend:${GIT_COMMIT}
+                        docker push ${DOCKER_HUB_USER}/todo-frontend:latest
+
+                        cd ../backend
+                        docker push ${DOCKER_HUB_USER}/todo-backend:${GIT_COMMIT}
+                        docker push ${DOCKER_HUB_USER}/todo-backend:latest
+                    """
                 }
             }
         }
@@ -87,41 +90,43 @@ pipeline {
                 withCredentials([
                     string(credentialsId: 'dev-db-user', variable: 'DB_USER'),
                     string(credentialsId: 'dev-db-pass', variable: 'DB_PASS'),
-                    sshUserPrivateKey(credentialsId: 'app-ec2-ssh', keyFileVariable: 'SSH_KEY')
+                    sshUserPrivateKey(
+                        credentialsId: 'app-ec2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
                 ]) {
-                    script {
-                        sh """
-                            ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ubuntu@${APP_EC2_IP} '
-                                echo "=== Deploying Backend ==="
-                                docker stop todo-backend || true
-                                docker rm todo-backend || true
-                                docker pull ${DOCKER_HUB_USER}/todo-backend:latest
-                                docker run -d \\
-                                    --name todo-backend \\
-                                    --restart unless-stopped \\
-                                    -p 5000:5000 \\
-                                    -e DATABASE_HOST=${DB_HOST} \\
-                                    -e DATABASE_PORT=5432 \\
-                                    -e DATABASE_NAME=devdb \\
-                                    -e DATABASE_USER=${DB_USER} \\
-                                    -e DATABASE_PASSWORD=${DB_PASS} \\
-                                    -e PORT=5000 \\
-                                    -e NODE_ENV=development \\
-                                    ${DOCKER_HUB_USER}/todo-backend:latest
-                                
-                                echo "=== Deploying Frontend ==="
-                                docker stop todo-frontend || true
-                                docker rm todo-frontend || true
-                                docker pull ${DOCKER_HUB_USER}/todo-frontend:latest
-                                docker run -d \\
-                                    --name todo-frontend \\
-                                    --restart unless-stopped \\
-                                    -p 3000:3000 \\
-                                    -e NEXT_PUBLIC_API_URL=http://${APP_EC2_IP}:5000/api \\
-                                    ${DOCKER_HUB_USER}/todo-frontend:latest
-                            '
-                        """
-                    }
+                    sh """
+                        ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${SSH_USER}@${APP_EC2_IP} '
+                            echo "=== Deploying Backend ==="
+                            docker stop todo-backend || true
+                            docker rm todo-backend || true
+                            docker pull ${DOCKER_HUB_USER}/todo-backend:latest
+                            docker run -d \\
+                                --name todo-backend \\
+                                --restart unless-stopped \\
+                                -p 5000:5000 \\
+                                -e DATABASE_HOST=${DB_HOST} \\
+                                -e DATABASE_PORT=5432 \\
+                                -e DATABASE_NAME=devdb \\
+                                -e DATABASE_USER=${DB_USER} \\
+                                -e DATABASE_PASSWORD=${DB_PASS} \\
+                                -e PORT=5000 \\
+                                -e NODE_ENV=development \\
+                                ${DOCKER_HUB_USER}/todo-backend:latest
+
+                            echo "=== Deploying Frontend ==="
+                            docker stop todo-frontend || true
+                            docker rm todo-frontend || true
+                            docker pull ${DOCKER_HUB_USER}/todo-frontend:latest
+                            docker run -d \\
+                                --name todo-frontend \\
+                                --restart unless-stopped \\
+                                -p 3000:3000 \\
+                                -e NEXT_PUBLIC_API_URL=http://${APP_EC2_IP}:5000/api \\
+                                ${DOCKER_HUB_USER}/todo-frontend:latest
+                        '
+                    """
                 }
             }
         }
@@ -135,7 +140,7 @@ pipeline {
             }
         }
 
-                stage('Deploy to Production') {
+        stage('Deploy to Production') {
             when {
                 branch 'master'
             }
@@ -144,26 +149,23 @@ pipeline {
                     file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG'),
                     string(credentialsId: 'prod-db-pass', variable: 'PROD_DB_PASS')
                 ]) {
-                    script {
-                        sh '''
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
-                            
-                            kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
-                            kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \\
-                                --from-literal=username=produser \\
-                                --from-literal=password=${PROD_DB_PASS}
-                            
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/deployment.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/service.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/configmap.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/deployment.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/service.yaml
-                            
-                            # Nếu có ingress.yaml
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/ingress.yaml
-                        '''
-                    }
+                    sh '''
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
+
+                        kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
+                        kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \
+                            --from-literal=username=produser \
+                            --from-literal=password=${PROD_DB_PASS}
+
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/deployment.yaml
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/service.yaml
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/configmap.yaml
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/deployment.yaml
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/service.yaml
+
+                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/ingress.yaml
+                    '''
                 }
             }
         }
