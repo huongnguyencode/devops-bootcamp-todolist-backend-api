@@ -152,52 +152,62 @@ pipeline {
         }
 
         stage('Deploy to Production') {
-            when {
-                branch 'master'
-            }
-            steps {
-                withCredentials([
-                    string(credentialsId: 'prod-db-pass', variable: 'PROD_DB_PASS')
-                ]) {
-                    sh '''
-                        export KUBECONFIG=/var/jenkins_home/secret-files/kubeconfig
+    when {
+        branch 'master'
+    }
+    steps {
+        withCredentials([
+            string(credentialsId: 'prod-db-pass', variable: 'PROD_DB_PASS')
+        ]) {
+            sh '''
+                export KUBECONFIG=/var/jenkins_home/secret-files/kubeconfig
 
-                        echo "=== Checking Kubernetes connection ==="
-                        kubectl --kubeconfig=${KUBECONFIG} get nodes
+                echo "=== Current workspace ==="
+                pwd
+                ls -lah
 
-                        echo "=== Applying namespace ==="
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
+                echo "=== Go to backend repo ==="
+                cd backend
+                pwd
+                ls -lah
+                ls -lah k8s
 
-                        echo "=== Creating database secret ==="
-                        kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
-                        kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \
-                            --from-literal=username=produser \
-                            --from-literal=password=${PROD_DB_PASS}
+                echo "=== Checking Kubernetes connection ==="
+                kubectl --kubeconfig=${KUBECONFIG} get nodes
 
-                        echo "=== Deploying backend ==="
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/deployment.yaml
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/service.yaml
+                echo "=== Applying namespace ==="
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/namespace.yaml
 
-                        echo "=== Deploying frontend ==="
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/configmap.yaml
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/deployment.yaml
-                        kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/service.yaml
+                echo "=== Creating database secret ==="
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist delete secret db-secret --ignore-not-found=true
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist create secret generic db-secret \
+                    --from-literal=username=produser \
+                    --from-literal=password=${PROD_DB_PASS}
 
-                        echo "=== Applying ingress if exists ==="
-                        if [ -f k8s/ingress.yaml ]; then
-                            kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/ingress.yaml
-                        else
-                            echo "k8s/ingress.yaml not found, skipping ingress."
-                        fi
+                echo "=== Deploying backend ==="
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/configmap.yaml
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/deployment.yaml
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/backend/service.yaml
 
-                        echo "=== Deployment status ==="
-                        kubectl --kubeconfig=${KUBECONFIG} -n todolist get pods
-                        kubectl --kubeconfig=${KUBECONFIG} -n todolist get svc
-                    '''
-                }
-            }
+                echo "=== Deploying frontend ==="
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/configmap.yaml
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/deployment.yaml
+                kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/frontend/service.yaml
+
+                echo "=== Applying ingress if exists ==="
+                if [ -f k8s/ingress.yaml ]; then
+                    kubectl --kubeconfig=${KUBECONFIG} apply -f k8s/ingress.yaml
+                else
+                    echo "k8s/ingress.yaml not found, skipping ingress."
+                fi
+
+                echo "=== Deployment status ==="
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist get pods
+                kubectl --kubeconfig=${KUBECONFIG} -n todolist get svc
+            '''
         }
+    }
+}
     }
 
     post {
