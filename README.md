@@ -1,405 +1,481 @@
-# Todo List Application - Full Stack with Kubernetes
+markdown
+# 3-Tier Application Deployment on AWS with CI/CD and Observability
 
-A production-ready todo list application with a Next.js frontend, Express.js backend, and PostgreSQL database, designed to be deployed on Kubernetes with multiple replicas for high availability.
+## Overview
 
-## 📋 Table of Contents
+This project demonstrates an end-to-end DevOps workflow for deploying a 3-tier To-Do List application on AWS.
 
-- [Features](#features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Kubernetes Deployment](#kubernetes-deployment)
-- [API Documentation](#api-documentation)
-- [Database Schema](#database-schema)
+The system includes:
 
-## ✨ Features
+- Frontend application
+- Backend API
+- PostgreSQL database
+- Jenkins CI/CD pipeline
+- Docker-based Dev deployment
+- Kubernetes Kind Production deployment
+- Observability stack with Prometheus, Grafana, Loki, Promtail, Node Exporter, and cAdvisor
 
-### Core Features
-- ✅ Create, read, update, and delete todos
-- ✅ Mark todos as complete/incomplete
-- ✅ Set priority levels (Low, Medium, High)
-- ✅ Add due dates to tasks
-- ✅ Filter todos by status (All, Active, Completed)
-- ✅ Search todos by title or description
-- ✅ Real-time updates with React Query
-- ✅ Responsive design for mobile and desktop
-- ✅ Clean, modern UI with Tailwind CSS
+The main goal is to automate application delivery, separate Dev and Production environments, secure database access, and monitor the system with metrics and logs.
 
-### Production Features
-- ✅ Kubernetes-ready with multiple replicas
-- ✅ Health checks and readiness probes
-- ✅ Horizontal pod autoscaling support
-- ✅ Rolling updates with zero downtime
-- ✅ PostgreSQL with persistent storage
-- ✅ Connection pooling for database efficiency
-- ✅ Environment-based configuration
-- ✅ Docker containerization
+---
+## Architecture
+The infrastructure is deployed inside a custom AWS VPC.
+```text
+Developer
+   ↓
+GitHub
+   ↓
+Jenkins
+   ↓
+Docker Build
+   ↓
+Docker Hub
+   ↓
+Dev Deployment on App EC2
+   ↓
+Manual Approval
+   ↓
+Production Deployment on Kubernetes Kind
+   ↓
+Monitoring with Prometheus, Loki, and Grafana
+# 1. Infrastructure Design
 
-## 🏗️ Architecture
+## 1.1 Network Architecture
 
-```
-┌─────────────────┐
-│   Ingress       │
-│  (todolist.local)│
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-┌───▼──────┐ ┌▼──────────┐
-│ Frontend │ │  Backend  │
-│ (Next.js)│ │ (Express) │
-│ 2 replicas│ │ 3 replicas│
-└──────────┘ └─────┬─────┘
-                   │
-            ┌──────▼─────────┐
-            │   PostgreSQL   │
-            │  (StatefulSet) │
-            └────────────────┘
-```
+* Custom VPC
+* 2 Public Subnets across 2 Availability Zones
+* 2 Private Subnets across 2 Availability Zones
+* Internet Gateway for public subnet access
+* NAT Gateway for private subnet outbound access
+* Public Route Table: `0.0.0.0/0 -> Internet Gateway`
+* Private Route Table: `0.0.0.0/0 -> NAT Gateway`
 
-## 🛠️ Tech Stack
+### Why this design?
 
-### Frontend
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **State Management**: TanStack React Query
-- **HTTP Client**: Axios
+* Public subnets are used for Internet-facing services such as Jenkins, Grafana, and the Dev application server.
+* Private subnets are used for the PostgreSQL database to prevent direct Internet access.
+* Multi-AZ subnet design improves availability and follows cloud architecture best practices.
+* A single NAT Gateway is used in this lab to optimize AWS cost, while production environments should use one NAT Gateway per Availability Zone.
 
-### Backend
-- **Framework**: Express.js
-- **Language**: TypeScript
-- **Database Client**: node-postgres (pg)
-- **Validation**: express-validator
-- **Logger**: Morgan
+---
 
-### Database
-- **Database**: PostgreSQL 15
-- **Features**: Indexed queries, connection pooling
+# 2. EC2 Infrastructure
 
-### DevOps
-- **Containerization**: Docker (multi-stage builds)
-- **Orchestration**: Kubernetes
-- **Deployment**: Rolling updates
-- **Ingress**: NGINX Ingress Controller
+| EC2 Instance | Subnet         | Purpose                                             |
+| ------------ | -------------- | --------------------------------------------------- |
+| Tools EC2    | Public Subnet  | Jenkins, Prometheus, Grafana, Loki, Kubernetes Kind |
+| App EC2      | Public Subnet  | Dockerized Frontend and Backend for Dev             |
+| Database EC2 | Private Subnet | PostgreSQL Database                                 |
 
-## 📁 Project Structure
+## 2.1 Why EC2?
 
-```
-.
-├── devops-bootcamp-todolist-backend-api/
-│   ├── src/
-│   │   ├── config/
-│   │   │   └── database.ts          # PostgreSQL connection pool
-│   │   ├── controllers/
-│   │   │   └── todoController.ts    # Business logic
-│   │   ├── models/
-│   │   │   └── todoModel.ts         # Database queries
-│   │   ├── routes/
-│   │   │   └── todoRoutes.ts        # API routes
-│   │   └── server.ts                # Express app setup
-│   ├── Dockerfile                   # Backend container image
-│   ├── package.json
-│   └── tsconfig.json
-│
-├── devops-bootcamp-todolist-frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── layout.tsx           # Root layout with QueryClient
-│   │   │   ├── page.tsx             # Main page
-│   │   │   └── globals.css          # Global styles
-│   │   ├── components/
-│   │   │   ├── TodoForm.tsx         # Add todo form
-│   │   │   ├── TodoItem.tsx         # Todo item display
-│   │   │   └── FilterBar.tsx        # Filter & search
-│   │   └── lib/
-│   │       ├── api.ts               # API client
-│   │       └── types.ts             # TypeScript types
-│   ├── Dockerfile                   # Frontend container image
-│   ├── package.json
-│   ├── next.config.js
-│   └── tailwind.config.ts
-│
-└── k8s/
-    ├── namespace.yaml               # Namespace definition
-    ├── postgres/
-    │   ├── secret.yaml              # Database credentials
-    │   ├── statefulset.yaml         # PostgreSQL deployment
-    │   └── service.yaml             # Database service
-    ├── backend/
-    │   ├── configmap.yaml           # Backend config
-    │   ├── deployment.yaml          # Backend deployment (3 replicas)
-    │   └── service.yaml             # Backend service
-    ├── frontend/
-    │   ├── configmap.yaml           # Frontend config
-    │   ├── deployment.yaml          # Frontend deployment (2 replicas)
-    │   └── service.yaml             # Frontend service
-    └── ingress.yaml                 # Ingress configuration
-```
+* Practice real infrastructure operations
+* Linux server administration
+* Docker installation and deployment
+* Jenkins hosting
+* Kubernetes Kind setup
+* PostgreSQL deployment
+* Monitoring stack configuration
 
-## 🚀 Getting Started
+### Production Recommendation
 
-### Prerequisites
-- Node.js 20+
-- PostgreSQL 15+
-- Docker (for containerization)
-- Kubernetes cluster (for K8s deployment)
+* Replace self-managed services with managed services such as:
 
-### Local Development
+  * Amazon RDS
+  * AWS EKS
 
-#### 1. Setup Database
+---
+
+# 3. Security Design
+
+## 3.1 Network Security
+
+* Database EC2 is deployed in a private subnet
+* PostgreSQL is not publicly accessible
+* Public-facing services are hosted in public subnets
+* Private subnet outbound traffic routes through NAT Gateway
+
+## 3.2 Security Groups
+
+| Security Group | Purpose                                                           |
+| -------------- | ----------------------------------------------------------------- |
+| SG-Tools       | Access control for Jenkins, Grafana, Prometheus, Loki             |
+| SG-App         | Application traffic for Frontend and Backend                      |
+| SG-DB          | Allows PostgreSQL access only from App EC2 and Production Backend |
+
+## 3.3 Credentials Management
+
+* Dev database credentials stored in Jenkins Credentials
+* Production credentials stored in Kubernetes Secrets
+* No database passwords committed to GitHub
+
+### Why this design?
+
+* Follows the Principle of Least Privilege
+* Restricts unnecessary communication
+* Protects sensitive credentials from source code exposure
+
+---
+
+# 4. CI/CD Pipeline
+
+## 4.1 Pipeline Flow
+
+1. Checkout Source Code
+2. Build Docker Images
+3. Run Tests
+4. Push Images to Docker Hub
+5. Deploy to Dev
+6. Manual Approval
+7. Deploy to Production
+
+## 4.2 Why Jenkins?
+
+* Widely used CI/CD automation tool
+* Full control over:
+
+  * Build stages
+  * Testing
+  * Deployment
+  * Credentials
+  * Approval workflows
+
+## 4.3 Benefits
+
+* Reduces manual deployment effort
+* Standardizes deployment process
+* Detects errors earlier
+* Supports manual approval before Production
+* Secures credentials using Jenkins Credentials
+
+---
+
+# 5. Docker Deployment
+
+## 5.1 Containerization
+
+* Frontend and Backend are packaged as Docker images
+
+## 5.2 Why Docker?
+
+* Ensures environment consistency
+* Same image used across environments:
+
+  * Dev on App EC2
+  * Production on Kubernetes Kind
+
+## 5.3 Benefits
+
+* Consistent runtime environment
+* Easier deployment
+* Easier rollback using image tags
+* Better CI/CD integration
+* Dependencies packaged with the application
+
+---
+
+# 6. Development Environment Deployment
+
+## 6.1 Deployment Flow
+
+Jenkins
+↓ SSH
+App EC2
+↓
+Pull Docker Images
+↓
+Run Frontend and Backend Containers
+↓
+Backend connects to PostgreSQL
+
+---
+
+# 7. Production Deployment with Kubernetes Kind
+
+## 7.1 Overview
+
+* Production environment runs on Kubernetes Kind inside Tools EC2
+* Kind = Kubernetes in Docker
+* Used for cost-efficient Kubernetes practice
+
+## 7.2 Kubernetes Objects
+
+| Object     | Purpose                           |
+| ---------- | --------------------------------- |
+| Namespace  | Resource isolation                |
+| ConfigMap  | Store non-sensitive configuration |
+| Secret     | Store database credentials        |
+| Deployment | Manage Frontend and Backend Pods  |
+| Service    | Internal Pod communication        |
+| NodePort   | External Frontend access          |
+
+## 7.3 Production Flow
+
+Docker Hub
+↓
+Kubernetes Deployment
+↓
+Frontend Pod
+↓
+Backend Service
+↓
+Backend Pod
+↓
+PostgreSQL on Database EC2
+
+## 7.4 Why Kubernetes Kind?
+
+* Practice Kubernetes without managed service cost
+* Supports:
+
+  * Pods
+  * Deployments
+  * Services
+  * ConfigMaps
+  * Secrets
+
+## 7.5 Benefits
+
+* Production-like workflow
+* Pod self-healing
+* Easier application updates
+* Preparation for migration to AWS EKS
+
+## 7.6 Limitation
+
+* Suitable for lab/demo only
+* AWS EKS recommended for real production workloads
+
+---
+
+# 8. Observability Stack
+
+## 8.1 Components
+
+* Prometheus
+* Grafana
+* cAdvisor
+* Node Exporter
+* Loki
+* Promtail
+* Log Generator
+
+## 8.2 Exposed Ports
+
+| Service       | Port |
+| ------------- | ---- |
+| Grafana       | 3000 |
+| Prometheus    | 9090 |
+| cAdvisor      | 8080 |
+| Node Exporter | 9100 |
+| Loki          | 3100 |
+| Promtail      | 9080 |
+
+---
+
+# 9. Metrics and Logging Flow
+
+## 9.1 Metrics Flow
+
+Node Exporter
+cAdvisor
+Backend `/metrics`
+↓
+Prometheus
+↓
+Grafana
+
+## 9.2 Logs Flow
+
+Application Logs
+Docker Container Logs
+System Logs
+↓
+Promtail
+↓
+Loki
+↓
+Grafana
+
+---
+
+# 10. Monitoring Tools Explanation
+
+## 10.1 Prometheus
+
+Used for metrics collection and storage.
+
+### Example Metrics
+
+* CPU usage
+* Memory usage
+* Disk usage
+* Request count
+* Error rate
+* API latency
+
+---
+
+## 10.2 Node Exporter
+
+Collects host-level metrics from EC2 instances.
+
+### Monitors
+
+* CPU
+* RAM
+* Disk
+* Network
+
+---
+
+## 10.3 cAdvisor
+
+Collects container-level metrics.
+
+### Monitors
+
+* Container CPU usage
+* Container memory usage
+* Network traffic
+* Container status
+
+---
+
+## 10.4 Loki
+
+Stores and queries logs.
+
+### Purpose
+
+* Investigate failures
+* Centralized log management
+
+---
+
+## 10.5 Promtail
+
+Collects logs from:
+
+* Containers
+* System logs
+
+Then forwards logs to Loki.
+
+---
+
+## 10.6 Grafana
+
+Visualization platform connected to:
+
+* Prometheus for metrics
+* Loki for logs
+
+### Benefits
+
+* Centralized dashboards
+* Real-time visibility
+* Easier debugging
+* Unified metrics and logs
+
+---
+
+# 11. Useful Commands
+
+## 11.1 Start Observability Stack
 
 ```bash
-# Create database
-createdb todolist
-
-# Or using psql
-psql -U postgres
-CREATE DATABASE todolist;
+docker-compose up -d
 ```
 
-#### 2. Backend Setup
+## 11.2 View Running Containers
 
 ```bash
-cd devops-bootcamp-todolist-backend-api
-
-# Install dependencies
-npm install
-
-# Create .env file
-cp .env.example .env
-
-# Edit .env with your database credentials
-# DATABASE_HOST=localhost
-# DATABASE_PORT=5432
-# DATABASE_NAME=todolist
-# DATABASE_USER=postgres
-# DATABASE_PASSWORD=postgres
-# PORT=5000
-# NODE_ENV=development
-
-# Run development server
-npm run dev
+docker ps
 ```
 
-Backend will be available at `http://localhost:5000`
-
-#### 3. Frontend Setup
+## 11.3 View Service Logs
 
 ```bash
-cd devops-bootcamp-todolist-frontend
-
-# Install dependencies
-npm install
-
-# Create .env.local file
-echo "NEXT_PUBLIC_API_URL=http://localhost:5000/api" > .env.local
-
-# Run development server
-npm run dev
+docker-compose logs -f
 ```
 
-Frontend will be available at `http://localhost:3000`
-
-## ☸️ Kubernetes Deployment
-
-### Prerequisites
-- Kubernetes cluster (local or cloud)
-- kubectl configured
-- Docker for building images
-
-### Step 1: Build Docker Images
+## 11.4 Stop Services
 
 ```bash
-# Build backend image
-cd devops-bootcamp-todolist-backend-api
-docker build -t todo-backend:latest .
-
-# Build frontend image
-cd ../devops-bootcamp-todolist-frontend
-docker build -t todo-frontend:latest .
+docker-compose down
 ```
 
-### Step 2: Deploy to Kubernetes
+## 11.5 Remove Services and Volumes
 
 ```bash
-# Create namespace
-kubectl apply -f k8s/namespace.yaml
-
-# Deploy PostgreSQL
-kubectl apply -f k8s/postgres/
-
-# Deploy Backend
-kubectl apply -f k8s/backend/
-
-# Deploy Frontend
-kubectl apply -f k8s/frontend/
-
-# Deploy Ingress
-kubectl apply -f k8s/ingress.yaml
+docker-compose down -v
 ```
 
-### Step 3: Verify Deployment
+## 11.6 Restart Prometheus
 
 ```bash
-# Check all pods are running
-kubectl get pods -n todolist
-
-# Check services
-kubectl get svc -n todolist
-
-# Check ingress
-kubectl get ingress -n todolist
+docker-compose restart prometheus
 ```
 
-### Step 4: Access the Application
+---
 
-Add to your `/etc/hosts`:
-```
-127.0.0.1 todolist.local
-```
+# 12. Grafana Dashboards
 
-Access the application at `http://todolist.local`
+| Dashboard                | Purpose                            |
+| ------------------------ | ---------------------------------- |
+| Node Exporter Full       | EC2 metrics                        |
+| Docker Container Metrics | Container resource usage           |
+| cAdvisor Dashboard       | Container monitoring               |
+| Loki Logs Dashboard      | Centralized logs                   |
+| Application Dashboard    | Request count, latency, error rate |
 
-### Scaling
+## 12.1 Example Dashboard IDs
 
-```bash
-# Scale backend
-kubectl scale deployment backend -n todolist --replicas=5
+* Node Exporter Full: 1860
+* Docker Container & Host Metrics: 179
+* cAdvisor: 893
+* Loki Stack Monitoring: 14055
+* Loki Logs Dashboard: 13639
+* Container Logs: 15141
 
-# Scale frontend
-kubectl scale deployment frontend -n todolist --replicas=3
-```
+---
 
-## 📚 API Documentation
+# 13. Project Achievements
 
-### Endpoints
+## 13.1 Infrastructure
 
-#### Get All Todos
-```http
-GET /api/todos
-Query Parameters:
-  - completed: boolean (optional)
-  - priority: low|medium|high (optional)
-  - search: string (optional)
-```
+* AWS VPC with public/private subnet architecture
+* Internet Gateway and NAT Gateway
+* Route Tables
+* EC2 infrastructure for tools, app, and database
 
-#### Get Single Todo
-```http
-GET /api/todos/:id
-```
+## 13.2 Security
 
-#### Create Todo
-```http
-POST /api/todos
-Body:
-{
-  "title": "string (required)",
-  "description": "string (optional)",
-  "priority": "low|medium|high (optional, default: medium)",
-  "due_date": "ISO 8601 date string (optional)"
-}
-```
+* Security Group isolation
+* Database protection in private subnet
+* Credential management
 
-#### Update Todo
-```http
-PUT /api/todos/:id
-Body:
-{
-  "title": "string (optional)",
-  "description": "string (optional)",
-  "completed": "boolean (optional)",
-  "priority": "low|medium|high (optional)",
-  "due_date": "ISO 8601 date string (optional)"
-}
-```
+## 13.3 DevOps & Deployment
 
-#### Toggle Todo Completion
-```http
-PATCH /api/todos/:id/toggle
-```
+* Dockerized Frontend and Backend
+* Jenkins CI/CD Pipeline
+* Docker Hub integration
+* Dev deployment using Docker
+* Production deployment using Kubernetes Kind
 
-#### Delete Todo
-```http
-DELETE /api/todos/:id
-```
+## 13.4 Kubernetes
 
-### Health Checks
+* Namespace
+* ConfigMap
+* Secret
+* Deployment
+* Service
+* NodePort
 
-```http
-GET /health        # Liveness probe
-GET /ready         # Readiness probe (checks DB connection)
-```
+## 13.5 Monitoring & Logging
 
-## 🗄️ Database Schema
-
-```sql
-CREATE TABLE todos (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    description TEXT,
-    completed BOOLEAN DEFAULT false,
-    priority VARCHAR(20) CHECK (priority IN ('low', 'medium', 'high')) DEFAULT 'medium',
-    due_date TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Indexes for performance
-CREATE INDEX idx_todos_completed ON todos(completed);
-CREATE INDEX idx_todos_due_date ON todos(due_date);
-CREATE INDEX idx_todos_priority ON todos(priority);
-```
-
-## 🔧 Configuration
-
-### Backend Environment Variables
-- `DATABASE_HOST`: PostgreSQL host
-- `DATABASE_PORT`: PostgreSQL port (default: 5432)
-- `DATABASE_NAME`: Database name
-- `DATABASE_USER`: Database user
-- `DATABASE_PASSWORD`: Database password
-- `PORT`: Backend port (default: 5000)
-- `NODE_ENV`: Environment (development/production)
-
-### Frontend Environment Variables
-- `NEXT_PUBLIC_API_URL`: Backend API URL
-
-## 📝 Features in Detail
-
-### Priority Levels
-- **High**: Red color indicator, urgent tasks
-- **Medium**: Yellow color indicator, normal priority
-- **Low**: Green color indicator, low priority
-
-### Filtering
-- **All**: Show all todos
-- **Active**: Show only incomplete todos
-- **Completed**: Show only completed todos
-
-### Search
-Real-time search across todo titles and descriptions
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## 📄 License
-
-This project is licensed under the ISC License.
-
-## 👨‍💻 Author
-
-Created for DevOps Bootcamp
-
-## 🙏 Acknowledgments
-
-- Next.js team for the amazing framework
-- Express.js community
-- PostgreSQL contributors
-- Kubernetes community
+* Prometheus metrics collection
+* Loki log aggregation
+* Promtail log shipping
+* Grafana dashboards
